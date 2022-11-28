@@ -1,35 +1,28 @@
-from typing import List, Optional, Tuple, Union, Dict, Deque
-
-from collections import deque, defaultdict
+from typing import List, Tuple, Union, Dict
 import numpy as np
-import pandas as pd
 
+import TechCore
+import TechCore.Simulator.utils
 from TechCore.Simulator.simulator import MdUpdate, Order, OwnTrade, Sim
 
 
-from TechCore.Simulator.utils import get_mid_price, update_best_positions
+from TechCore.Simulator.utils import update_best_positions
 
 from collections import deque
 
 
 class Strategy:
-    '''
-        This strategy places ask and bid order every `delay` nanoseconds.
-        If the order has not been executed within `hold_time` nanoseconds, it is canceled.
-    '''
-    def __init__(self, delay: float, risk_koef, time_oi, time_vol, avg_sum_oi, avg_time_oi, avg_volatility, order_fees=0.00001, hold_time:Optional[float] = None) -> None:
-        '''
-            Args:
-                delay(float): delay between orders in nanoseconds
-                hold_time(Optional[float]): holding time in nanoseconds
-        '''
-        self.delay = delay
-        if hold_time is None:
-            hold_time = max( delay * 5, pd.Timedelta(10, 's').delta )
-        self.hold_time = hold_time
+    """
+        This strategy places ask and bid order every `T` nanoseconds.
+        If the order has not been executed within `T` nanoseconds, it is canceled.
+    """
+    def __init__(self, t: float, risk_koef, time_oi, time_vol, avg_sum_oi, avg_time_oi, avg_volatility, min_asset_value,
+                 order_fees=0.00001) -> None:
+
+        self.T = t
 
         self.risk_koef = risk_koef
-        self.normalizer = 0.001
+        self.normalizer = min_asset_value
 
         self.time_oi = time_oi
         self.time_vol = time_vol
@@ -58,6 +51,12 @@ class Strategy:
         self.logs = {
             'asset_position': [],
             'usd_position': [],
+            'best_ask': [],
+            'best_bid': [],
+            'ask_place': [],
+            'bid_place': [],
+            'ask_diff': [],
+            'bid_diff': [],
             'my_spread': [],
             'stock_spread': [],
             'total_liq': [],
@@ -68,14 +67,18 @@ class Strategy:
             'midprice': [],
             'indiff_price': [],
             'own_trade_time': [],
-            'place_order_time': []
+            'place_order_time': [],
+            'vol_window_size': [],
+            'oi_window_size': [],
+            'vol_window_len': []
         }
 
         self.useless_logs = []
+        self.cnt_db = 0
 
-    def run(self, sim: Sim ) -> \
-            Tuple[ List[OwnTrade], List[MdUpdate], List[ Union[OwnTrade, MdUpdate] ], List[Order] ]:
-        '''
+    def run(self, sim: Sim) -> \
+            Tuple[List[OwnTrade], List[MdUpdate], List[Union[OwnTrade, MdUpdate]], List[Order]]:
+        """
             This function runs simulation
 
             Args:
@@ -86,46 +89,33 @@ class Strategy:
                 updates_list( List[ Union[OwnTrade, MdUpdate] ] ): list of all updates
                 received by strategy(market data and information about executed trades)
                 all_orders(List[Orted]): list of all placed orders
-        '''
-        #market data list
-        md_list:List[MdUpdate] = []
-        #executed trades list
-        trades_list:List[OwnTrade] = []
-        #all updates list
+        """
+        # market data list
+        md_list: List[MdUpdate] = []
+        # executed trades list
+        trades_list: List[OwnTrade] = []
+        # all updates list
         updates_list = []
-        #current best positions
+        # current best positions
         best_bid = -np.inf
         best_ask = np.inf
 
-        #last order timestamp
+        # last order timestamp
         prev_time = -np.inf
-        #orders that have not been executed/canceled yet
+        # orders that have not been executed/canceled yet
         ongoing_orders: Dict[int, Order] = {}
         all_orders = []
         while True:
-            #get update from simulator
+            # get update from simulator
             receive_ts, updates = sim.tick()
             if updates is None:
                 break
-            #save updates
+            # save updates
             updates_list += updates
             for update in updates:
-                #update best position
-                # ----------------------------------------------------------------How to do this better-----------
-                tp = "MdUpdate"
+                # update best position
 
-                try:
-                    tmp = update.orderbook
-                except:
-                    try:
-                        tmp = update.order_id
-                        tp = "OwnTrade"
-                    except:
-                        tp = "Wrong"
-
-                #print(isinstance(update, simulator.MdUpdate), isinstance(update, simulator.OwnTrade))
-                # print(tp, type(update))
-                if tp == "MdUpdate":
+                if isinstance(update, TechCore.Simulator.utils.MdUpdate):
                     best_bid, best_ask = update_best_positions(best_bid, best_ask, update)
                     self.mid_price = (best_ask + best_bid) / 2
 
@@ -139,7 +129,7 @@ class Strategy:
                         self.order_intensity_size_records.append(update.trade.size)
 
                     md_list.append(update)
-                elif tp == "OwnTrade":
+                elif isinstance(update, TechCore.Simulator.utils.OwnTrade):
                     self.order_intensity_time_records.append(update.receive_ts)
                     self.order_intensity_size_records.append(update.size)
 
@@ -157,7 +147,7 @@ class Strategy:
 
                     self.total_liq += update.size * update.price
                     self.pnl = self.asset_position * self.mid_price + self.usd_position
-                    self.logs['pnl'].append(self.asset_position * self.mid_price + self.usd_position)
+                    self.logs['pnl'].append(self.pnl)
 
                     self.logs['asset_position'].append(self.asset_position)
                     self.logs['usd_position'].append(self.usd_position)
@@ -167,10 +157,12 @@ class Strategy:
                 else:
                     assert False, 'Invalid type'
 
-            if receive_ts - prev_time >= self.delay:
+            if receive_ts - prev_time >= self.T:
                 prev_time = receive_ts
                 mid_price = (best_bid + best_ask) / 2
                 self.logs['midprice'].append(mid_price)
+                self.logs['best_ask'].append(best_ask)
+                self.logs['best_bid'].append(best_bid)
                 self.logs['stock_spread'].append(best_ask - best_bid)
 
                 self.volatility_price_records.append(mid_price)
@@ -183,6 +175,9 @@ class Strategy:
                     while self.volatility_time_records[-1] - self.volatility_time_records[0] > self.time_vol:
                         self.volatility_time_records.popleft()
                         self.volatility_price_records.popleft()
+                    self.logs['vol_window_size'].append(self.volatility_time_records[-1] -
+                                                        self.volatility_time_records[0])
+                    self.logs['vol_window_len'].append(len(self.volatility_time_records))
                     volatility = np.array(self.volatility_price_records).std()**2
                     volatility /= self.avg_volatility
 
@@ -192,6 +187,8 @@ class Strategy:
                     while self.order_intensity_time_records[-1] - self.order_intensity_time_records[0] > self.time_oi:
                         self.order_intensity_time_records.popleft()
                         self.order_intensity_size_records.popleft()
+                    self.logs['oi_window_size'].append(self.order_intensity_time_records[-1] -
+                                                       self.order_intensity_time_records[0])
                     total_time = self.order_intensity_time_records[-1] - self.order_intensity_time_records[0]
                     total_sum = np.array(self.order_intensity_size_records).sum()
                     scaled_sum = total_sum / self.avg_sum_oi
@@ -202,14 +199,21 @@ class Strategy:
                 self.logs['volatility'].append(volatility)
                 self.logs['order_intensity'].append(scaled_order_intensity)
 
-                indifference_price = mid_price - (self.asset_position/self.normalizer)*self.risk_koef*volatility  # (T - t) = 1
+                # (T - t) = 1
+                indifference_price = mid_price - (self.asset_position/self.normalizer)*self.risk_koef*volatility
                 self.logs['indiff_price'].append(indifference_price)
-                delta_x2 = self.risk_koef*volatility + 2/self.risk_koef*np.log(1 + self.risk_koef / scaled_order_intensity)
-                self.logs['my_spread'].append(delta_x2)
-                self.logs['place_order_time'].append(receive_ts)
+                delta_x2 = self.risk_koef*volatility + 2/self.risk_koef*np.log(1 + self.risk_koef /
+                                                                               scaled_order_intensity)
 
                 ask_place = indifference_price + delta_x2 / 2
                 bid_place = indifference_price - delta_x2 / 2
+
+                self.logs['my_spread'].append(delta_x2)
+                self.logs['place_order_time'].append(receive_ts)
+                self.logs['ask_place'].append(ask_place)
+                self.logs['bid_place'].append(bid_place)
+                self.logs['ask_diff'].append(ask_place - best_ask)
+                self.logs['bid_diff'].append(bid_place - best_bid)
 
                 # place order
                 bid_order = sim.place_order(receive_ts, 0.001, 'BID', bid_place)
@@ -221,8 +225,8 @@ class Strategy:
 
             to_cancel = []
             for ID, order in ongoing_orders.items():
-                if order.place_ts < receive_ts - self.hold_time:
-                    sim.cancel_order( receive_ts, ID )
+                if order.place_ts < receive_ts - self.T:
+                    sim.cancel_order(receive_ts, ID)
                     to_cancel.append(ID)
             for ID in to_cancel:
                 ongoing_orders.pop(ID)
