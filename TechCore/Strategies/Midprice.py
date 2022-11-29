@@ -13,7 +13,7 @@ from collections import deque
 
 class Strategy:
     """
-        Strategy from Stoikov's article
+        Strategy with Stoikov's spread and casual midprice (no adverse selection and inventory risk eliminated)
 
         This strategy places ask and bid order every `T` nanoseconds.
         If the order has not been executed within `T` nanoseconds, it is canceled.
@@ -222,7 +222,7 @@ class Strategy:
                     self.logs['order_intensity'].append(self.scaled_order_intensity)
 
                     # (T - t) = 1
-                    indifference_price = midprice - (self.asset_position/self.normalizer)*self.risk_koef*self.volatility
+                    indifference_price = midprice
                     self.logs['indiff_price'].append(indifference_price)
                     my_spread = self.risk_koef*self.volatility + 2/self.risk_koef*np.log(1 + self.risk_koef /
                                                                                          self.scaled_order_intensity)
