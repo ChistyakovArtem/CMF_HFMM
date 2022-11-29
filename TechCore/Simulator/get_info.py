@@ -8,7 +8,11 @@ from TechCore.Simulator.simulator import MdUpdate, OwnTrade, update_best_positio
 
 def get_pnl(updates_list: List[Union[MdUpdate, OwnTrade]], cost=-0.00001) -> pd.DataFrame:
     """
-        This function calculates PnL from list of updates
+    This function calculates pnl from the list of updates
+
+    :param updates_list:    list of md updates
+    :param cost:            negative commission
+    :return:                pnl of updates_list (strategy's return)
     """
 
     # current position in btc and usd
@@ -26,8 +30,7 @@ def get_pnl(updates_list: List[Union[MdUpdate, OwnTrade]], cost=-0.00001) -> pd.
         
         if isinstance(update, MdUpdate):
             best_bid, best_ask = update_best_positions(best_bid, best_ask, update)
-        # mid price
-        # i use it to calculate current portfolio value
+        # mid price to calculate current portfolio value
         mid_price = 0.5 * (best_ask + best_bid)
         
         if isinstance(update, OwnTrade):
@@ -40,8 +43,8 @@ def get_pnl(updates_list: List[Union[MdUpdate, OwnTrade]], cost=-0.00001) -> pd.
                 btc_pos -= trade.size
                 usd_pos += trade.price * trade.size
             usd_pos -= cost * trade.price * trade.size
+
         # current portfolio value
-        
         btc_pos_arr[i] = btc_pos
         usd_pos_arr[i] = usd_pos
         mid_price_arr[i] = mid_price

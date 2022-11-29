@@ -25,17 +25,13 @@ def load_before_time(path, t):
 
 def load_trades(path: str, t: int) -> List[AnonTrade]:
     """
-        This function downloads trades data
+    This function downloads trades data
 
-        Args:
-            path(str): path to file
-            T(int): max timestamp from the first one in nanoseconds
-
-        Return:
-            trades(List[AnonTrade]): list of trades 
-            :param path:
-            :param t:
+    :param path:    Path to file
+    :param t:       Max timestamp from the first one in nanoseconds
+    :return:        List of market trades
     """
+
     trades = load_before_time(path + 'trades.csv', t)
     
     # переставляю колонки, чтобы удобнее подавать их в конструктор AnonTrade
@@ -50,16 +46,11 @@ def load_trades(path: str, t: int) -> List[AnonTrade]:
 
 def load_books(path: str, t: int) -> List[OrderbookSnapshotUpdate]:
     """
-        This function downloads orderbook market data
+    This function downloads orderbook market data
 
-        Args:
-            path(str): path to file
-            T(int): max timestamp from the first one in nanoseconds
-
-        Return:
-            books(List[OrderbookSnapshotUpdate]): list of orderbooks snapshots 
-            :param path:
-            :param t:
+    :param path:    Path to file
+    :param t:       Max timestamp from the first one in nanoseconds
+    :return:        List of orderbooks
     """
     lobs = load_before_time(path + 'lobs.csv', t)
     
@@ -88,7 +79,11 @@ def load_books(path: str, t: int) -> List[OrderbookSnapshotUpdate]:
 
 def merge_books_and_trades(books: List[OrderbookSnapshotUpdate], trades: List[AnonTrade]) -> List[MdUpdate]:
     """
-        This function merges lists of orderbook snapshots and trades 
+    This function merges lists of orderbook snapshots and trades
+
+    :param books:       List of orderbook snapshots
+    :param trades:      List of market trades
+    :return:            Merged (by time) list of MdUpdates
     """
     trades_dict = {(trade.exchange_ts, trade.receive_ts): trade for trade in trades}
     books_dict = {(book.exchange_ts, book.receive_ts): book for book in books}
@@ -99,10 +94,14 @@ def merge_books_and_trades(books: List[OrderbookSnapshotUpdate], trades: List[An
     return md
 
 
-def load_md_from_file(path: str, t: int) -> List[MdUpdate]:
+def load_md_from_file(path: str, run_time: int) -> List[MdUpdate]:
     """
-        This function downloads orderbooks and trades and merges them
+    This function downloads orderbooks and trades and merges them
+
+    :param path:        Path to download from
+    :param run_time:           Max timestamp from the first one in nanoseconds
+    :return:            Merged (by time) list of MdUpdates
     """
-    books = load_books(path, t)
-    trades = load_trades(path, t)
+    books = load_books(path, run_time)
+    trades = load_trades(path, run_time)
     return merge_books_and_trades(books, trades)

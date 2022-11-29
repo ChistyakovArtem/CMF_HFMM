@@ -64,6 +64,14 @@ class MdUpdate:  # Data of a tick
 
 
 def update_best_positions(best_bid: float, best_ask: float, md: MdUpdate) -> Tuple[float, float]:
+    """
+    Update best ask and bid prices with market data update
+
+    :param best_bid:    Best bid
+    :param best_ask:    Best ask
+    :param md:          Market data
+    :return:            New best_bid and best_ask
+    """
     if md.orderbook is not None:
         best_bid = md.orderbook.bids[0][0]
         best_ask = md.orderbook.asks[0][0]
@@ -75,23 +83,6 @@ def update_best_positions(best_bid: float, best_ask: float, md: MdUpdate) -> Tup
         else:
             assert False, "WRONG TRADE SIDE"
     return best_bid, best_ask
-
-
-def get_mid_price(mid_price: float, md: MdUpdate):
-    book = md.orderbook
-    if book is None:
-        return mid_price
-
-    price = 0.0
-    pos = 0.0
-
-    for i in range(len(book.asks)):
-        price += book.asks[i][0] * book.asks[i][1]
-        pos += book.asks[i][1]
-        price += book.bids[i][0] * book.bids[i][1]
-        pos += book.bids[i][1]
-    price /= pos
-    return price
 
 
 class PriorQueue:

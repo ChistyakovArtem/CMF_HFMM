@@ -69,7 +69,7 @@ class Sim:
 
     def update_md(self, md: MdUpdate) -> None:
         # current orderbook
-        self.md = md 
+        self.md = md
         # update position
         self.best_bid, self.best_ask = update_best_positions(self.best_bid, self.best_ask, md)
         # update info about last trade
