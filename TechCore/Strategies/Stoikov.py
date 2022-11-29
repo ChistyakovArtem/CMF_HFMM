@@ -16,8 +16,23 @@ class Strategy:
         This strategy places ask and bid order every `T` nanoseconds.
         If the order has not been executed within `T` nanoseconds, it is canceled.
     """
-    def __init__(self, t: float, risk_koef, time_oi, time_vol, avg_sum_oi, avg_time_oi, avg_volatility, min_asset_value,
+    def __init__(self, t: float, risk_koef, time_oi, avg_sum_oi, avg_time_oi, avg_volatility, min_asset_value,
+                 volatility_record_cooldown, volatility_horizon, order_intensity_min_samples,
                  order_fees=0.00001) -> None:
+
+        """
+        :param t:                               Both "delay between orders" and "order hold" time
+        :param risk_koef:                       From Stoikov article
+        :param time_oi:                         Time in which we record average order intensity (oi)
+        :param avg_sum_oi:                      Average sum of order sizes in window
+        :param avg_time_oi:                     Average time of window ( -> time_oi)
+        :param avg_volatility:                  Average volatility
+        :param min_asset_value:                 Min asset value to scale our position (Stoikov article)
+        :param volatility_record_cooldown:      We record best_ask for volatility once in ... seconds
+        :param volatility_horizon:              How much records we use for volatility to be computed
+        :param order_intensity_min_samples:     Min samples to compute the order intensity
+        :param order_fees:                      Market Making negative fees
+        """
 
         self.T = t
 
@@ -25,15 +40,14 @@ class Strategy:
         self.normalizer = min_asset_value
 
         self.time_oi = time_oi
-        self.time_vol = time_vol
 
         self.avg_sum_oi = avg_sum_oi
 
         self.avg_volatility = avg_volatility
         self.order_fees = order_fees
         self.avg_time_oi = avg_time_oi
-
-        self.atoi = []
+        self.volatility_record_cooldown = volatility_record_cooldown
+        self.volatility_horizon = volatility_horizon
 
         self.asset_position = 0
         self.usd_position = 0
@@ -44,9 +58,14 @@ class Strategy:
         self.order_intensity_time_records = deque()
         self.order_intensity_size_records = deque()
 
+        self.order_intensity_min_samples = order_intensity_min_samples
+
         self.pnl = 0
         self.mid_price = 0
         self.total_liq = 0
+
+        self.volatility = None
+        self.scaled_order_intensity = None
 
         self.logs = {
             'asset_position': [],
@@ -75,6 +94,32 @@ class Strategy:
 
         self.useless_logs = []
         self.cnt_db = 0
+
+    def update_volatility(self, best_ask, receive_ts):
+        prev_time = self.volatility_time_records[-1] if len(self.volatility_time_records) != 0 else 0
+        if receive_ts - prev_time > self.volatility_record_cooldown:
+            self.volatility_time_records.append(receive_ts)
+            self.volatility_price_records.append(best_ask)
+
+        while len(self.volatility_time_records) > self.volatility_horizon:
+            self.volatility_time_records.popleft()
+            self.volatility_price_records.popleft()
+
+        self.volatility = np.array(self.volatility_price_records).std()**2 / self.avg_volatility
+
+    def update_order_intensity(self):
+        if len(self.order_intensity_time_records) > self.order_intensity_min_samples:
+            while self.order_intensity_time_records[-1] - self.order_intensity_time_records[0] > self.time_oi:
+                self.order_intensity_time_records.popleft()
+                self.order_intensity_size_records.popleft()
+            self.logs['oi_window_size'].append(self.order_intensity_time_records[-1] -
+                                               self.order_intensity_time_records[0])
+            total_time = self.order_intensity_time_records[-1] - self.order_intensity_time_records[0]
+            total_sum = np.array(self.order_intensity_size_records).sum()
+            scaled_sum = total_sum / self.avg_sum_oi
+            scaled_time = total_time / self.avg_time_oi
+            self.scaled_order_intensity = scaled_sum / scaled_time
+            self.useless_logs.append(total_time)
 
     def run(self, sim: Sim) -> \
             Tuple[List[OwnTrade], List[MdUpdate], List[Union[OwnTrade, MdUpdate]], List[Order]]:
@@ -147,8 +192,8 @@ class Strategy:
 
                     self.total_liq += update.size * update.price
                     self.pnl = self.asset_position * self.mid_price + self.usd_position
-                    self.logs['pnl'].append(self.pnl)
 
+                    self.logs['pnl'].append(self.pnl)
                     self.logs['asset_position'].append(self.asset_position)
                     self.logs['usd_position'].append(self.usd_position)
                     self.logs['total_liq'].append(self.total_liq)
@@ -165,63 +210,40 @@ class Strategy:
                 self.logs['best_bid'].append(best_bid)
                 self.logs['stock_spread'].append(best_ask - best_bid)
 
-                self.volatility_price_records.append(mid_price)
-                self.volatility_time_records.append(receive_ts)
+                self.update_volatility(
+                    best_ask=best_ask,
+                    receive_ts=receive_ts
+                )
+                self.update_order_intensity()
 
-                # это нужно чтобы спред не взлетал как истребитель в самом начале
-                if len(self.volatility_time_records) <= 100:  # first iterations
-                    volatility = 1
-                else:
-                    while self.volatility_time_records[-1] - self.volatility_time_records[0] > self.time_vol:
-                        self.volatility_time_records.popleft()
-                        self.volatility_price_records.popleft()
-                    self.logs['vol_window_size'].append(self.volatility_time_records[-1] -
-                                                        self.volatility_time_records[0])
-                    self.logs['vol_window_len'].append(len(self.volatility_time_records))
-                    volatility = np.array(self.volatility_price_records).std()**2
-                    volatility /= self.avg_volatility
+                if self.volatility is not None and self.scaled_order_intensity is not None:
+                    self.logs['volatility'].append(self.volatility)
+                    self.logs['order_intensity'].append(self.scaled_order_intensity)
 
-                if len(self.order_intensity_time_records) <= 100:
-                    scaled_order_intensity = 1
-                else:
-                    while self.order_intensity_time_records[-1] - self.order_intensity_time_records[0] > self.time_oi:
-                        self.order_intensity_time_records.popleft()
-                        self.order_intensity_size_records.popleft()
-                    self.logs['oi_window_size'].append(self.order_intensity_time_records[-1] -
-                                                       self.order_intensity_time_records[0])
-                    total_time = self.order_intensity_time_records[-1] - self.order_intensity_time_records[0]
-                    total_sum = np.array(self.order_intensity_size_records).sum()
-                    scaled_sum = total_sum / self.avg_sum_oi
-                    scaled_time = total_time / self.avg_time_oi
-                    scaled_order_intensity = scaled_sum / scaled_time
-                    self.useless_logs.append(total_time)
+                    # (T - t) = 1
+                    indifference_price = mid_price -\
+                                         (self.asset_position/self.normalizer)*self.risk_koef*self.volatility
+                    self.logs['indiff_price'].append(indifference_price)
+                    delta_x2 = self.risk_koef*self.volatility + 2/self.risk_koef*np.log(1 + self.risk_koef /
+                                                                                        self.scaled_order_intensity)
 
-                self.logs['volatility'].append(volatility)
-                self.logs['order_intensity'].append(scaled_order_intensity)
+                    ask_place = indifference_price + delta_x2 / 2
+                    bid_place = indifference_price - delta_x2 / 2
 
-                # (T - t) = 1
-                indifference_price = mid_price - (self.asset_position/self.normalizer)*self.risk_koef*volatility
-                self.logs['indiff_price'].append(indifference_price)
-                delta_x2 = self.risk_koef*volatility + 2/self.risk_koef*np.log(1 + self.risk_koef /
-                                                                               scaled_order_intensity)
+                    self.logs['my_spread'].append(delta_x2)
+                    self.logs['place_order_time'].append(receive_ts)
+                    self.logs['ask_place'].append(ask_place)
+                    self.logs['bid_place'].append(bid_place)
+                    self.logs['ask_diff'].append(ask_place - best_ask)
+                    self.logs['bid_diff'].append(bid_place - best_bid)
 
-                ask_place = indifference_price + delta_x2 / 2
-                bid_place = indifference_price - delta_x2 / 2
+                    # place order
+                    bid_order = sim.place_order(receive_ts, 0.001, 'BID', bid_place)
+                    ask_order = sim.place_order(receive_ts, 0.001, 'ASK', ask_place)
+                    ongoing_orders[bid_order.order_id] = bid_order
+                    ongoing_orders[ask_order.order_id] = ask_order
 
-                self.logs['my_spread'].append(delta_x2)
-                self.logs['place_order_time'].append(receive_ts)
-                self.logs['ask_place'].append(ask_place)
-                self.logs['bid_place'].append(bid_place)
-                self.logs['ask_diff'].append(ask_place - best_ask)
-                self.logs['bid_diff'].append(bid_place - best_bid)
-
-                # place order
-                bid_order = sim.place_order(receive_ts, 0.001, 'BID', bid_place)
-                ask_order = sim.place_order(receive_ts, 0.001, 'ASK', ask_place)
-                ongoing_orders[bid_order.order_id] = bid_order
-                ongoing_orders[ask_order.order_id] = ask_order
-
-                all_orders += [bid_order, ask_order]
+                    all_orders += [bid_order, ask_order]
 
             to_cancel = []
             for ID, order in ongoing_orders.items():
