@@ -20,7 +20,7 @@ class Strategy:
     """
     def __init__(self, delay: float, risk_koef, time_oi, avg_sum_oi, avg_time_oi, avg_volatility, min_asset_value,
                  volatility_record_cooldown, volatility_horizon, order_intensity_min_samples,
-                 order_fees=0.00001) -> None:
+                 order_fees=-0.00001) -> None:
 
         """
         :param delay:                           Both "delay between orders" and "order hold" time
@@ -202,7 +202,7 @@ class Strategy:
                     self.logs['asset_position'].append(self.asset_position)
                     self.logs['usd_position'].append(self.usd_position)
                     self.logs['total_liq'].append(self.total_liq)
-                    self.logs['pnl_with_liq'].append(self.pnl + self.total_liq*self.order_fees)
+                    self.logs['pnl_with_liq'].append(self.pnl - self.total_liq*self.order_fees)
                     self.logs['own_trade_time'].append(receive_ts)
                 else:
                     assert False, 'Invalid type'
