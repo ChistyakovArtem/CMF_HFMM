@@ -2,7 +2,7 @@
 My work on a project "High Frequency Market Making: Optimal Quoting" in the Center of Mathematical Finances.
 
 # Results
-- Made a High Frequency Market Making strategy that provides **0.9 million $ of liquidity in a day and earns 35% daily yield with 2 % MDD**.
+- Made a High Frequency Market Making strategy that provides **1.2 million $ of liquidity in a day and earns 5.6% daily yield with 2 % MDD**.
 - This strategy can be found in https://github.com/ChistyakovArtem/CMF_HFMM/blob/main/TechCore/Strategies/ML_Strategies/ML_Stoikov.py.
 - Fitting of this straategy - here https://github.com/ChistyakovArtem/CMF_HFMM/blob/main/Notebooks/ML_1-Stoikov-with-ML(Model-Fitter).ipynb.
 - Running process and results - here https://github.com/ChistyakovArtem/CMF_HFMM/blob/main/Notebooks/ML_1-Stoikov-with-ML.ipynb.
